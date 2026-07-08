@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	lessflags "github.com/xhd2015/less-flags"
 )
 
 const (
@@ -54,32 +56,204 @@ const markerBlock = `# === cmdlog integration begin ===
 `
 
 func RunIntegration(args []string) error {
-	if len(args) < 2 {
-		return fmt.Errorf("usage: cmdlog integration <bash|zsh> --install|--uninstall")
+	remain, err := lessflags.Help("-h,--help", integrationHelp).
+		StopOnFirstArg().
+		Parse(args)
+	if err != nil {
+		return err
 	}
 
-	shell := args[0]
-	action := args[1]
+	if len(remain) == 0 {
+		printHelp(integrationHelp)
+	}
 
+	shell := remain[0]
 	switch shell {
 	case "bash":
-		switch action {
-		case "--install":
-			return installBash()
-		case "--uninstall":
-			return uninstallBash()
-		default:
-			return fmt.Errorf("unknown integration action %q", action)
-		}
+		return runIntegrationBash(remain[1:])
 	case "zsh":
-		if action == "--install" {
-			fmt.Fprintln(os.Stderr, "zsh integration not yet supported")
-			os.Exit(1)
-		}
-		return fmt.Errorf("unknown integration action %q", action)
+		return runIntegrationZsh(remain[1:])
 	default:
 		return fmt.Errorf("unknown shell %q", shell)
 	}
+}
+
+func runIntegrationBash(args []string) error {
+	action, dryRun, err := parseIntegrationShellArgs(args, integrationBashHelp, map[string]string{
+		"--install":   integrationBashInstallHelp,
+		"--uninstall": integrationBashUninstallHelp,
+		"--status":    integrationBashStatusHelp,
+	})
+	if err != nil {
+		return err
+	}
+	if action == "" {
+		printHelp(integrationBashHelp)
+	}
+	if dryRun && action == "--status" {
+		return fmt.Errorf("unknown integration action %q", "--dry-run")
+	}
+
+	switch action {
+	case "--install":
+		if dryRun {
+			return installBashDryRun()
+		}
+		return installBash()
+	case "--uninstall":
+		if dryRun {
+			return uninstallBashDryRun()
+		}
+		return uninstallBash()
+	case "--status":
+		statusBash()
+		return nil
+	default:
+		return fmt.Errorf("unknown integration action %q", action)
+	}
+}
+
+func runIntegrationZsh(args []string) error {
+	action, _, err := parseIntegrationShellArgs(args, integrationZshHelp, map[string]string{
+		"--install": integrationZshHelp,
+	})
+	if err != nil {
+		return err
+	}
+	if action == "" {
+		printHelp(integrationZshHelp)
+	}
+	if action == "--install" {
+		fmt.Fprintln(os.Stderr, "zsh integration not yet supported")
+		os.Exit(1)
+	}
+	return fmt.Errorf("unknown integration action %q", action)
+}
+
+func parseIntegrationShellArgs(args []string, shellHelp string, actionHelp map[string]string) (action string, dryRun bool, err error) {
+	for _, arg := range args {
+		switch arg {
+		case "--install", "--uninstall", "--status":
+			if action != "" {
+				return "", false, fmt.Errorf("unknown integration action %q", arg)
+			}
+			action = arg
+		case "--dry-run":
+			dryRun = true
+		case "-h", "--help":
+			if text, ok := actionHelp[action]; ok && action != "" {
+				printHelp(text)
+			}
+			printHelp(shellHelp)
+		default:
+			return "", false, fmt.Errorf("unknown integration action %q", arg)
+		}
+	}
+	return action, dryRun, nil
+}
+
+func bashPaths() (home, scriptPath, profilePath string, err error) {
+	home, err = os.UserHomeDir()
+	if err != nil {
+		return "", "", "", err
+	}
+	scriptPath = filepath.Join(home, ".cmdlog", "integration", "bash.sh")
+	profilePath = filepath.Join(home, ".bash_profile")
+	return home, scriptPath, profilePath, nil
+}
+
+func scriptPresent(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func markerPresent(profilePath string) bool {
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), markerBegin)
+}
+
+func installBashDryRun() error {
+	_, scriptPath, profilePath, err := bashPaths()
+	if err != nil {
+		return err
+	}
+
+	if markerPresent(profilePath) {
+		fmt.Println("cmdlog bash integration: already installed")
+		fmt.Printf("profile: %s (marker present)\n", profilePath)
+		if scriptPresent(scriptPath) {
+			fmt.Printf("script: %s (exists)\n", scriptPath)
+		} else {
+			fmt.Printf("script: %s (absent)\n", scriptPath)
+		}
+		fmt.Println("no changes needed")
+		return nil
+	}
+
+	fmt.Println("dry-run: would write ~/.cmdlog/integration/bash.sh")
+	fmt.Println("dry-run: would append marker block to ~/.bash_profile")
+	fmt.Println()
+	fmt.Print(markerBlock)
+	return nil
+}
+
+func uninstallBashDryRun() error {
+	_, _, profilePath, err := bashPaths()
+	if err != nil {
+		return err
+	}
+
+	if !markerPresent(profilePath) {
+		fmt.Println("cmdlog bash integration: already uninstalled")
+		fmt.Printf("profile: %s (marker absent)\n", profilePath)
+		fmt.Println("no changes needed")
+		return nil
+	}
+
+	fmt.Println("dry-run: would remove marker block from ~/.bash_profile")
+	fmt.Println()
+	fmt.Print(markerBlock)
+	return nil
+}
+
+func statusBash() {
+	_, scriptPath, profilePath, err := bashPaths()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	scriptExists := scriptPresent(scriptPath)
+	markerExists := markerPresent(profilePath)
+
+	var state string
+	exitCode := 1
+	switch {
+	case scriptExists && markerExists:
+		state = "installed"
+		exitCode = 0
+	case !scriptExists && !markerExists:
+		state = "not installed"
+	default:
+		state = "partial"
+	}
+
+	fmt.Printf("bash integration: %s\n", state)
+	if scriptExists {
+		fmt.Printf("script: %s (present)\n", scriptPath)
+	} else {
+		fmt.Printf("script: %s (absent)\n", scriptPath)
+	}
+	if markerExists {
+		fmt.Printf("profile: %s (marker present)\n", profilePath)
+	} else {
+		fmt.Printf("profile: %s (marker absent)\n", profilePath)
+	}
+	fmt.Println()
+	os.Exit(exitCode)
 }
 
 func installBash() error {

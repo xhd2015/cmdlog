@@ -19,8 +19,15 @@ cmdlog summary [--date YYYY-MM-DD]
 cmdlog timeline [--from RFC3339] [--to RFC3339]
 cmdlog dirs [--date YYYY-MM-DD]
 cmdlog integration bash --install
+cmdlog integration bash --install --dry-run
 cmdlog integration bash --uninstall
+cmdlog integration bash --uninstall --dry-run
+cmdlog integration bash --status
 ```
+
+`--install --dry-run` and `--uninstall --dry-run` preview changes without writing files.
+`--status` reports whether bash integration is `installed`, `partial`, or `not installed`
+(exit 0 only when fully installed).
 
 ## Storage
 

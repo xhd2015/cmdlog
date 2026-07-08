@@ -22,7 +22,12 @@ func loadEvents() ([]event.Event, error) {
 	})
 }
 
-func RunToday() error {
+func RunToday(args []string) error {
+	_, err := lessflags.Help("-h,--help", todayHelp).Parse(args)
+	if err != nil {
+		return err
+	}
+
 	events, err := loadEvents()
 	if err != nil {
 		return err
@@ -39,7 +44,10 @@ func RunToday() error {
 
 func RunSummary(args []string) error {
 	var dateFlag string
-	_, err := lessflags.String("--date", &dateFlag).StopOnFirstArg().Parse(args)
+	_, err := lessflags.String("--date", &dateFlag).
+		Help("-h,--help", summaryHelp).
+		StopOnFirstArg().
+		Parse(args)
 	if err != nil {
 		return err
 	}
@@ -85,7 +93,11 @@ func RunSummary(args []string) error {
 
 func RunTimeline(args []string) error {
 	var fromFlag, toFlag string
-	_, err := lessflags.String("--from", &fromFlag).String("--to", &toFlag).StopOnFirstArg().Parse(args)
+	_, err := lessflags.String("--from", &fromFlag).
+		String("--to", &toFlag).
+		Help("-h,--help", timelineHelp).
+		StopOnFirstArg().
+		Parse(args)
 	if err != nil {
 		return err
 	}
@@ -120,7 +132,10 @@ func RunTimeline(args []string) error {
 
 func RunDirs(args []string) error {
 	var dateFlag string
-	_, err := lessflags.String("--date", &dateFlag).StopOnFirstArg().Parse(args)
+	_, err := lessflags.String("--date", &dateFlag).
+		Help("-h,--help", dirsHelp).
+		StopOnFirstArg().
+		Parse(args)
 	if err != nil {
 		return err
 	}

@@ -11,9 +11,16 @@ import (
 
 func RunRecord(args []string) error {
 	var cwd string
-	remain, err := lessflags.String("--cwd", &cwd).StopOnFirstArg().Parse(args)
+	remain, err := lessflags.String("--cwd", &cwd).
+		Help("-h,--help", recordHelp).
+		StopOnFirstArg().
+		Parse(args)
 	if err != nil {
 		return err
+	}
+
+	if len(remain) == 0 && cwd == "" {
+		printHelp(recordHelp)
 	}
 
 	command := extractCommand(remain)

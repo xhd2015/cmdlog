@@ -41,6 +41,10 @@ never the real `~/.cmdlog` or `~/.bash_profile`.
 - **Stdout contract:** all user-facing stdout ends with trailing `\n`.
 - Bash hook calls `cmdlog record` with `set +o history` so automation plumbing
   does not enter bash history; user commands and manual `cmdlog record` are logged.
+- `integration bash --install/--uninstall --dry-run` previews would-write/would-remove
+  actions without modifying profile, `bash.sh`, or `events.jsonl`.
+- `integration bash --status` reports `installed` / `partial` / `not installed` from
+  filesystem inspection only (read-only); exit 0 when installed, 1 otherwise.
 - `integration zsh --install` returns non-zero with "not yet supported".
 
 ## Decision Tree
@@ -72,9 +76,19 @@ tests/cmdlog/                                    ROOT: Request{Subcommand, ...}
 │   ├── bash/                                    DECISION: shell = bash
 │   │   ├── install/                             DECISION: action = install
 │   │   │   ├── first-install/                   LEAF: creates bash.sh + profile marker
-│   │   │   └── idempotent-second-install/       LEAF: second install → no duplicate marker
-│   │   └── uninstall/                           DECISION: action = uninstall
-│   │       └── remove-marker-preserve-events/   LEAF: marker gone, events.jsonl intact
+│   │   │   ├── idempotent-second-install/       LEAF: second install → no duplicate marker
+│   │   │   └── dry-run/                         DECISION: --dry-run on install
+│   │   │       ├── dry-run-fresh/               LEAF: empty HOME → preview only, no writes
+│   │   │       └── dry-run-already-installed/   LEAF: pre-seeded → no changes, exit 0
+│   │   ├── uninstall/                           DECISION: action = uninstall
+│   │   │   ├── remove-marker-preserve-events/   LEAF: marker gone, events.jsonl intact
+│   │   │   └── dry-run/                         DECISION: --dry-run on uninstall
+│   │   │       ├── dry-run-with-marker/         LEAF: marker present → removal preview, no writes
+│   │   │       └── dry-run-already-uninstalled/ LEAF: no marker → no changes, exit 0
+│   │   └── status/                              DECISION: action = status (read-only)
+│   │       ├── installed/                       LEAF: script + marker → installed, exit 0
+│   │       ├── not-installed/                   LEAF: empty HOME → not installed, exit 1
+│   │       └── partial-script-only/             LEAF: bash.sh only → partial, exit 1
 │   └── zsh/                                     DECISION: shell = zsh
 │       └── not-supported/                       LEAF: error "not yet supported", exit ≠ 0
 │
@@ -107,6 +121,13 @@ tests/cmdlog/                                    ROOT: Request{Subcommand, ...}
 | 14 | `bash-hook/capture-manual-cmdlog-record/` | Manual `cmdlog record` via history → event logged |
 | 15 | `bash-hook/suppress-automation-plumbing/` | Hook's internal `cmdlog record` not logged as user event |
 | 16 | `malformed-jsonl/skip-bad-line-with-warning/` | Malformed line skipped with stderr warning; valid lines processed |
+| 17 | `integration/bash/install/dry-run/dry-run-fresh/` | `--install --dry-run` on empty HOME → preview stdout, no files written |
+| 18 | `integration/bash/install/dry-run/dry-run-already-installed/` | `--install --dry-run` when installed → no changes, exit 0 |
+| 19 | `integration/bash/uninstall/dry-run/dry-run-with-marker/` | `--uninstall --dry-run` with marker → removal preview, profile unchanged |
+| 20 | `integration/bash/uninstall/dry-run/dry-run-already-uninstalled/` | `--uninstall --dry-run` without marker → no changes, exit 0 |
+| 21 | `integration/bash/status/installed/` | `--status` after install → `installed`, exit 0 |
+| 22 | `integration/bash/status/not-installed/` | `--status` on empty HOME → `not installed`, exit 1 |
+| 23 | `integration/bash/status/partial-script-only/` | `--status` with bash.sh only → `partial`, exit 1 |
 
 ## How to Run
 
@@ -158,9 +179,11 @@ type Request struct {
 	To   string
 
 	// integration
-	IntegrationShell  string // "bash" | "zsh"
-	IntegrationAction string // "install" | "uninstall"
-	RunTwice          bool   // second install for idempotency
+	IntegrationShell       string // "bash" | "zsh"
+	IntegrationAction      string // "install" | "uninstall" | "status"
+	DryRun                 bool   // --dry-run on install/uninstall
+	RunTwice               bool   // second install for idempotency
+	PreInstallIntegration  bool   // run real install before main integration command
 
 	// bash-hook
 	HookCommands []string // commands to history -s then _cmdlog_capture
@@ -170,6 +193,7 @@ type Request struct {
 	EventsFixtureFile  string  // path to JSONL fixture file
 	EventsRawContent   string  // raw JSONL written verbatim (e.g. includes corrupt lines)
 	PreExistingProfile string  // content for ~/.bash_profile before install/uninstall
+	PreExistingBashSh  string  // content for ~/.cmdlog/integration/bash.sh before run
 	PreExistingEvents  string  // raw JSONL written before uninstall test
 }
 
@@ -197,6 +221,17 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 
 	bin := buildCmdlogOnce(t)
 
+	if req.PreInstallIntegration {
+		installReq := Request{
+			Subcommand:        "integration",
+			IntegrationShell:  req.IntegrationShell,
+			IntegrationAction: "install",
+		}
+		if _, err := runCLI(t, &installReq, home, bin); err != nil {
+			return nil, fmt.Errorf("pre-install integration: %w", err)
+		}
+	}
+
 	if len(req.SeedEvents) > 0 || req.EventsFixtureFile != "" || req.EventsRawContent != "" {
 		if err := writeEventsFixture(t, req, home); err != nil {
 			return nil, err
@@ -205,6 +240,15 @@ func Run(t *testing.T, req *Request) (*Response, error) {
 	if req.PreExistingProfile != "" {
 		if err := os.WriteFile(filepath.Join(home, ".bash_profile"), []byte(req.PreExistingProfile), 0644); err != nil {
 			return nil, fmt.Errorf("write pre-existing profile: %w", err)
+		}
+	}
+	if req.PreExistingBashSh != "" {
+		integrationDir := filepath.Join(home, ".cmdlog", "integration")
+		if err := os.MkdirAll(integrationDir, 0755); err != nil {
+			return nil, fmt.Errorf("mkdir integration dir: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(integrationDir, "bash.sh"), []byte(req.PreExistingBashSh), 0644); err != nil {
+			return nil, fmt.Errorf("write pre-existing bash.sh: %w", err)
 		}
 	}
 	if req.PreExistingEvents != "" {
@@ -356,7 +400,14 @@ func buildArgs(req *Request) []string {
 		}
 		return args
 	case "integration":
-		args := []string{"integration", req.IntegrationShell, "--" + req.IntegrationAction}
+		args := []string{"integration", req.IntegrationShell}
+		if req.IntegrationAction == "status" {
+			return append(args, "--status")
+		}
+		args = append(args, "--"+req.IntegrationAction)
+		if req.DryRun {
+			args = append(args, "--dry-run")
+		}
 		return args
 	case "malformed":
 		return []string{"today"}
@@ -488,6 +539,22 @@ func readFileIfExists(path string) (string, bool) {
 
 func countMarkers(profile string) int {
 	return strings.Count(profile, "# === cmdlog integration begin ===")
+}
+
+// cmdlogMarkerBlock returns the standard profile marker block appended on install.
+func cmdlogMarkerBlock() string {
+	return `# === cmdlog integration begin ===
+[[ -f "$HOME/.cmdlog/integration/bash.sh" ]] && source "$HOME/.cmdlog/integration/bash.sh"
+# === cmdlog integration end ===
+`
+}
+
+// minimalBashSh returns a tiny bash.sh stub for pre-seeding partial/installed states.
+func minimalBashSh() string {
+	return `#!/usr/bin/env bash
+# cmdlog integration stub for doctest pre-seed
+_cmdlog_capture() { :; }
+`
 }
 
 // localTodayDate returns YYYY-MM-DD in local timezone for fixture seeding.
