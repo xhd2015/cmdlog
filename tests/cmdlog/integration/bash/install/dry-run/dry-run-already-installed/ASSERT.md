@@ -32,15 +32,14 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 __PROFILE__: type=string, example=/tmp/home/.bash_profile, profile path
 __SCRIPT__: type=string, example=/tmp/home/.cmdlog/integration/bash.sh, bash.sh path
 ---
 cmdlog bash integration: already installed
-profile: __PROFILE__ (marker present)
-script: __SCRIPT__ (exists)
+profile: __PROFILE__ \(marker present\)
+script: __SCRIPT__ \(exists\)
 no changes needed
-
 `)
 
 	if resp.MarkerCount != 1 {

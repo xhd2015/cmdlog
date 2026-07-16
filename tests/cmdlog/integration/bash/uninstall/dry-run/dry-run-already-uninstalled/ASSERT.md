@@ -31,13 +31,12 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 __PROFILE__: type=string, example=/tmp/home/.bash_profile, profile path
 ---
 cmdlog bash integration: already uninstalled
-profile: __PROFILE__ (marker absent)
+profile: __PROFILE__ \(marker absent\)
 no changes needed
-
 `)
 
 	if _, statErr := os.Stat(resp.ProfilePath); !os.IsNotExist(statErr) {

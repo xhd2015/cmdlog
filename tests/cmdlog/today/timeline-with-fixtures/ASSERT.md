@@ -2,12 +2,12 @@
 
 ```text
 ---
-version: 2
+version: 3
 __HOUR09__: type=string, example=09:00, morning hour label
 ---
 __HOUR09__ /proj/a
   git status
-  go test ./...
+  go test \./\.\.\.
 __HOUR10__ /proj/b
   make build
 ```
