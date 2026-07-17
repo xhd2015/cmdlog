@@ -2,9 +2,9 @@
 
 ```text
 ---
-version: 2
+version: 3
 ---
-4 commands, 2 directories, top: /work/main (3)
+4 commands, 2 directories, top: /work/main \(3\)
 ```
 
 ## Expected
@@ -32,9 +32,9 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 	}
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 ---
-4 commands, 2 directories, top: /work/main (3)
+4 commands, 2 directories, top: /work/main \(3\)
 `)
 }
 ```

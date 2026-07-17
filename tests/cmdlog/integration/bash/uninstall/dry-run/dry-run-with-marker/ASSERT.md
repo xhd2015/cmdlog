@@ -31,14 +31,13 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 ---
-dry-run: would remove marker block from ~/.bash_profile
+dry-run: would remove marker block from ~/\.bash_profile
 
 # === cmdlog integration begin ===
-[[ -f "$HOME/.cmdlog/integration/bash.sh" ]] && source "$HOME/.cmdlog/integration/bash.sh"
+\[\[ -f "\$HOME/\.cmdlog/integration/bash\.sh" \]\] && source "\$HOME/\.cmdlog/integration/bash\.sh"
 # === cmdlog integration end ===
-
 `)
 
 	if resp.MarkerCount != 1 {

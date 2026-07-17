@@ -32,15 +32,14 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 ---
-dry-run: would write ~/.cmdlog/integration/bash.sh
-dry-run: would append marker block to ~/.bash_profile
+dry-run: would write ~/\.cmdlog/integration/bash\.sh
+dry-run: would append marker block to ~/\.bash_profile
 
 # === cmdlog integration begin ===
-[[ -f "$HOME/.cmdlog/integration/bash.sh" ]] && source "$HOME/.cmdlog/integration/bash.sh"
+\[\[ -f "\$HOME/\.cmdlog/integration/bash\.sh" \]\] && source "\$HOME/\.cmdlog/integration/bash\.sh"
 # === cmdlog integration end ===
-
 `)
 
 	if _, statErr := os.Stat(resp.BashShPath); !os.IsNotExist(statErr) {
