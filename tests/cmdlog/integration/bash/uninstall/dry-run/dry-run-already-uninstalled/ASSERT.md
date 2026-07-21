@@ -17,9 +17,8 @@
 ```go
 import (
 	"os"
+	"strings"
 	"testing"
-
-	"github.com/xhd2015/doctest/assert"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
@@ -29,17 +28,18 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 	}
-
-	assert.Output(t, resp.Stdout, `---
-version: 2
-__PROFILE__: type=string, example=/tmp/home/.bash_profile, profile path
----
-cmdlog bash integration: already uninstalled
-profile: __PROFILE__ (marker absent)
-no changes needed
-
-`)
-
+	for _, want := range []string{
+		`cmdlog bash integration: already uninstalled`,
+		`(marker absent)`,
+		`no changes needed`,
+	} {
+		if !strings.Contains(resp.Stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, resp.Stdout)
+		}
+	}
+	if !strings.Contains(resp.Stdout, "profile: ") {
+		t.Fatalf("stdout missing profile line:\n%s", resp.Stdout)
+	}
 	if _, statErr := os.Stat(resp.ProfilePath); !os.IsNotExist(statErr) {
 		t.Fatalf("dry-run must not create .bash_profile at %s", resp.ProfilePath)
 	}

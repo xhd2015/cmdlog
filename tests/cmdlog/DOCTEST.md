@@ -25,7 +25,7 @@ never the real `~/.cmdlog` or `~/.bash_profile`.
   `_cmdlog_capture` delta detection.
 - **~/.bash_profile** — receives an idempotent marker block sourcing bash.sh on
   install; marker removed on uninstall (events preserved).
-- **Test harness** — builds cmdlog once per session, sets fake HOME, seeds
+- **Test harness** — builds cmdlog once per process (in-memory mutex), sets fake HOME, seeds
   fixtures, runs CLI or bash hook simulation (`history -s` + `_cmdlog_capture`).
 
 **Behaviors**
@@ -152,9 +152,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/xhd2015/doctest/session"
+)
+
+// Process-local cmdlog binary (one-process suite; in-memory mutex, not session flock).
+var (
+	cmdlogBinMu   sync.Mutex
+	cmdlogBinPath string
+	cmdlogBinErr  error
 )
 
 // Event mirrors the cmdlog JSONL schema under test.
@@ -215,11 +224,11 @@ type Response struct {
 	Error         string
 }
 
-func Run(t *testing.T, req *Request) (*Response, error) {
+func Run(t *testing.T, d *session.Doctest, req *Request) (*Response, error) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	bin := buildCmdlogOnce(t)
+	bin := buildCmdlogOnce(t, d)
 
 	if req.PreInstallIntegration {
 		installReq := Request{
@@ -416,58 +425,38 @@ func buildArgs(req *Request) []string {
 	}
 }
 
-func buildCmdlogOnce(t *testing.T) string {
+func buildCmdlogOnce(t *testing.T, d *session.Doctest) string {
 	t.Helper()
-	cacheDir := filepath.Join(os.TempDir(), "cmdlog-doctest-"+DOCTEST_SESSION_ID)
-	lockPath := filepath.Join(cacheDir, "build.lock")
-	readyPath := filepath.Join(cacheDir, "binaries.ready")
-	binPath := filepath.Join(cacheDir, "cmdlog")
-
-	withFileLock(t, lockPath, func() error {
-		if fileExists(readyPath) && fileExists(binPath) {
-			return nil
+	cmdlogBinMu.Lock()
+	defer cmdlogBinMu.Unlock()
+	if cmdlogBinPath != "" || cmdlogBinErr != nil {
+		if cmdlogBinErr != nil {
+			t.Fatal(cmdlogBinErr)
 		}
-		if err := os.MkdirAll(cacheDir, 0755); err != nil {
-			return err
-		}
-		moduleRoot := filepath.Join(DOCTEST_ROOT, "..", "..")
-		// Try cmd/cmdlog first, then module root.
-		for _, pkg := range []string{"./cmd/cmdlog", "."} {
-			build := exec.Command("go", "build", "-o", binPath, pkg)
-			build.Dir = moduleRoot
-			if out, err := build.CombinedOutput(); err == nil {
-				return os.WriteFile(readyPath, []byte("ok"), 0644)
-			} else {
-				_ = out
-			}
-		}
-		return fmt.Errorf("go build cmdlog failed from %s", moduleRoot)
-	})
-	return binPath
-}
-
-func withFileLock(t *testing.T, lockPath string, fn func() error) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
-		t.Fatalf("mkdir lock dir: %v", err)
+		return cmdlogBinPath
 	}
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	dir, err := os.MkdirTemp("", "cmdlog-doctest-bin-")
 	if err != nil {
-		t.Fatalf("open lock: %v", err)
+		cmdlogBinErr = err
+		t.Fatal(err)
 	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatalf("flock: %v", err)
+	binPath := filepath.Join(dir, "cmdlog")
+	moduleRoot := filepath.Clean(filepath.Join(d.DOCTEST_ROOT, "..", ".."))
+	var lastOut []byte
+	var lastErr error
+	for _, pkg := range []string{"./cmd/cmdlog", "."} {
+		build := exec.Command("go", "build", "-o", binPath, pkg)
+		build.Dir = moduleRoot
+		if out, err := build.CombinedOutput(); err == nil {
+			cmdlogBinPath = binPath
+			return binPath
+		} else {
+			lastOut, lastErr = out, err
+		}
 	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	if err := fn(); err != nil {
-		t.Fatalf("locked fn: %v", err)
-	}
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	cmdlogBinErr = fmt.Errorf("go build cmdlog failed from %s: %v\n%s", moduleRoot, lastErr, lastOut)
+	t.Fatal(cmdlogBinErr)
+	return ""
 }
 
 func writeEventsFixture(t *testing.T, req *Request, home string) error {

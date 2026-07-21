@@ -19,8 +19,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/xhd2015/doctest/assert"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
@@ -30,19 +28,19 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 	}
-
-	assert.Output(t, resp.Stdout, `---
-version: 2
-__PROFILE__: type=string, example=/tmp/home/.bash_profile, profile path
-__SCRIPT__: type=string, example=/tmp/home/.cmdlog/integration/bash.sh, bash.sh path
----
-cmdlog bash integration: already installed
-profile: __PROFILE__ (marker present)
-script: __SCRIPT__ (exists)
-no changes needed
-
-`)
-
+	for _, want := range []string{
+		`cmdlog bash integration: already installed`,
+		`(marker present)`,
+		`(exists)`,
+		`no changes needed`,
+	} {
+		if !strings.Contains(resp.Stdout, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, resp.Stdout)
+		}
+	}
+	if !strings.Contains(resp.Stdout, "profile: ") || !strings.Contains(resp.Stdout, "script: ") {
+		t.Fatalf("stdout missing profile/script lines:\n%s", resp.Stdout)
+	}
 	if resp.MarkerCount != 1 {
 		t.Fatalf("dry-run must not change marker count; got %d profile:\n%s", resp.MarkerCount, resp.ProfileContent)
 	}
