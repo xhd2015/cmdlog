@@ -31,6 +31,7 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 		t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 	}
 
+	// v3: each body line is a full-line Go regexp; escape [[, $, .
 	assert.Output(t, resp.Stdout, `---
 version: 3
 ---

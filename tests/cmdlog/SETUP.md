@@ -13,17 +13,17 @@ bash hook -> history -s + _cmdlog_capture -> cmdlog record (automation suppresse
 
 ## Preconditions
 
-- Go module at `filepath.Join(DOCTEST_ROOT, "..", "..")` with installable `cmdlog` binary.
+- Go module at `filepath.Join(d.DOCTEST_ROOT, "..", "..")` with installable `cmdlog` binary.
 - `doctest vet` and `doctest test` available on PATH.
 - **Isolation (mandatory):** every test sets `HOME` to `t.TempDir()` — never touches real
   `~/.cmdlog` or `~/.bash_profile`.
 - Bash available for `bash-hook/` leaves (`bash --noprofile --norc -c`).
-- Session-scoped binary cache at `$TMPDIR/cmdlog-doctest-<DOCTEST_SESSION_ID>/cmdlog`
-  built once per `doctest test` invocation (file lock + ready marker).
+- Process-local binary built once under an in-memory mutex (`buildCmdlogOnce`); no session
+  flock / free inject vars (one-process suite model).
 
 ## Steps
 
-1. `buildCmdlogOnce` compiles the cmdlog binary into the session cache (shared across leaves).
+1. `buildCmdlogOnce(t, d)` compiles the cmdlog binary once per process (shared across leaves).
 2. `Run` creates `home := t.TempDir()` and `t.Setenv("HOME", home)`.
 3. Seed fixtures (`SeedEvents`, `EventsFixtureFile`, `PreExistingProfile`, `PreExistingEvents`)
    when the scenario requires pre-existing state.
@@ -35,7 +35,7 @@ bash hook -> history -s + _cmdlog_capture -> cmdlog record (automation suppresse
 
 ## Context
 
-- `DOCTEST_ROOT` refers to the `tests/cmdlog/` directory.
+- `d.DOCTEST_ROOT` refers to the `tests/cmdlog/` directory (`d *session.Doctest`).
 - Event schema: `{"ts":"...Z","cwd":"...","cmd":"..."}` (UTC ISO8601 timestamp).
 - Query tests with date-sensitive fixtures use `localTodayDate()` and `utcTodayAt()` helpers.
 - Malformed JSONL leaf runs `cmdlog today` against a file with one bad line + one good line.
