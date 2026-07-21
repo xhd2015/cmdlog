@@ -29,13 +29,13 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	}
 
 	assert.Output(t, resp.Stdout, `---
-version: 2
+version: 3
 __SCRIPT__: type=string, example=/tmp/home/.cmdlog/integration/bash.sh, bash.sh path
 __PROFILE__: type=string, example=/tmp/home/.bash_profile, profile path
 ---
 bash integration: installed
-script: __SCRIPT__ (present)
-profile: __PROFILE__ (marker present)
+script: __SCRIPT__ \(present\)
+profile: __PROFILE__ \(marker present\)
 
 `)
 
