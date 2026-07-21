@@ -18,8 +18,9 @@
 ```go
 import (
 	"os"
-	"strings"
 	"testing"
+
+	"github.com/xhd2015/doctest/assert"
 )
 
 func Assert(t *testing.T, req *Request, resp *Response, err error) {
@@ -29,17 +30,19 @@ func Assert(t *testing.T, req *Request, resp *Response, err error) {
 	if resp.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d; stderr=%s", resp.ExitCode, resp.Stderr)
 	}
-	for _, want := range []string{
-		`dry-run: would write ~/.cmdlog/integration/bash.sh`,
-		`dry-run: would append marker block to ~/.bash_profile`,
-		`# === cmdlog integration begin ===`,
-		`[[ -f "$HOME/.cmdlog/integration/bash.sh" ]] && source "$HOME/.cmdlog/integration/bash.sh"`,
-		`# === cmdlog integration end ===`,
-	} {
-		if !strings.Contains(resp.Stdout, want) {
-			t.Fatalf("stdout missing %q:\n%s", want, resp.Stdout)
-		}
-	}
+
+	// v3: each body line is a full-line Go regexp; escape [[, $, .
+	assert.Output(t, resp.Stdout, `---
+version: 3
+---
+dry-run: would write ~/.cmdlog/integration/bash\.sh
+dry-run: would append marker block to ~/.bash_profile
+
+# === cmdlog integration begin ===
+\[\[ -f "\$HOME/\.cmdlog/integration/bash\.sh" \]\] && source "\$HOME/\.cmdlog/integration/bash\.sh"
+# === cmdlog integration end ===
+`)
+
 	if _, statErr := os.Stat(resp.BashShPath); !os.IsNotExist(statErr) {
 		t.Fatalf("dry-run must not create bash.sh at %s", resp.BashShPath)
 	}
